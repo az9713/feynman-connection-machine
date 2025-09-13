@@ -51,7 +51,7 @@ Simply open `feynman_fluid_simulation.html` in a modern web browser. No installa
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/feynman-connection-machine.git
+git clone https://github.com/az9713/feynman-connection-machine.git
 
 # Navigate to the directory
 cd feynman-connection-machine

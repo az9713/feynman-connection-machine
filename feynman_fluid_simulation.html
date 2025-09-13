@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feynman's Fluid Simulation - Hexagonal Lattice Gas</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #00ff00;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #00ff00;
+            text-shadow: 0 0 10px #00ff00;
+        }
+
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background: #0a0a0a;
+            border: 1px solid #00ff00;
+            border-radius: 5px;
+        }
+
+        .controls button {
+            background: #003300;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.3s;
+        }
+
+        .controls button:hover {
+            background: #00ff00;
+            color: #000;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        .controls input[type="range"] {
+            width: 200px;
+            margin: 0 10px;
+        }
+
+        .controls label {
+            margin-right: 10px;
+        }
+
+        #canvas {
+            border: 2px solid #00ff00;
+            display: block;
+            margin: 20px auto;
+            background: #000;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+        }
+
+        .info {
+            margin: 20px 0;
+            padding: 15px;
+            background: #0a0a0a;
+            border: 1px solid #00ff00;
+            border-radius: 5px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+        }
+
+        .stat-box {
+            padding: 10px;
+            background: #0a0a0a;
+            border: 1px solid #00ff00;
+            border-radius: 5px;
+            min-width: 150px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #00ff00;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #008800;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Feynman's Fluid Simulation</h1>
+        <div class="info">
+            <strong>The Connection Machine Concept:</strong> "Perfect ball bearings" moving at constant speed in 6 directions on a hexagonal lattice.
+            When many particles follow these simple rules, fluid-like behavior emerges - exactly as Feynman explained.
+        </div>
+
+        <div class="controls">
+            <button id="startBtn">Start</button>
+            <button id="pauseBtn">Pause</button>
+            <button id="resetBtn">Reset</button>
+            <button id="addObstacleBtn">Add Cylinder</button>
+            <button id="clearObstaclesBtn">Clear Obstacles</button>
+
+            <label>Particle Density:</label>
+            <input type="range" id="densitySlider" min="0.1" max="0.9" step="0.1" value="0.3">
+            <span id="densityValue">0.3</span>
+
+            <label>Flow Speed:</label>
+            <input type="range" id="speedSlider" min="0" max="0.3" step="0.05" value="0.1">
+            <span id="speedValue">0.1</span>
+
+            <label>Visualization:</label>
+            <select id="visualMode">
+                <option value="particles">Particles</option>
+                <option value="density">Density Field</option>
+                <option value="velocity">Velocity Field</option>
+                <option value="vorticity">Vorticity</option>
+            </select>
+
+            <br><br>
+
+            <label>Target FPS:</label>
+            <input type="range" id="fpsSlider" min="10" max="60" step="5" value="30">
+            <span id="fpsValue">30</span>
+
+            <label>Simulation Speed:</label>
+            <input type="range" id="simSpeedSlider" min="0.1" max="5" step="0.1" value="1">
+            <span id="simSpeedValue">1.0x</span>
+        </div>
+
+        <canvas id="canvas"></canvas>
+
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-value" id="particleCount">0</div>
+                <div class="stat-label">Particles</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="fps">0</div>
+                <div class="stat-label">FPS</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="reynolds">0</div>
+                <div class="stat-label">Reynolds Number</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value" id="simSteps">0</div>
+                <div class="stat-label">Steps/Frame</div>
+            </div>
+        </div>
+
+        <div class="info">
+            <strong>How it works:</strong><br>
+            • Each particle moves in one of 6 directions on a hexagonal grid<br>
+            • Particles collide and scatter according to momentum conservation<br>
+            • No complex physics equations - just simple collision rules<br>
+            • The emergent behavior mimics real fluid dynamics (Navier-Stokes)<br>
+            • This is the FHP (Frisch-Hasslacher-Pomeau) model that Feynman discussed
+        </div>
+    </div>
+
+    <script>
+        // Hexagonal Lattice Gas Automaton (FHP Model)
+        class HexLatticeFluid {
+            constructor(width, height, cellSize = 8) {
+                this.width = width;
+                this.height = height;
+                this.cellSize = cellSize;
+                this.cols = Math.floor(width / cellSize);
+                this.rows = Math.floor(height / cellSize);
+
+                // 6 directions on hexagonal lattice (60 degrees apart)
+                this.directions = [];
+                for (let i = 0; i < 6; i++) {
+                    const angle = i * Math.PI / 3;
+                    this.directions.push({
+                        x: Math.cos(angle),
+                        y: Math.sin(angle)
+                    });
+                }
+
+                // Lattice sites: each site has 6 possible particle states (one per direction)
+                this.lattice = [];
+                this.newLattice = [];
+                for (let i = 0; i < this.rows; i++) {
+                    this.lattice[i] = [];
+                    this.newLattice[i] = [];
+                    for (let j = 0; j < this.cols; j++) {
+                        this.lattice[i][j] = new Uint8Array(6); // 6 bits for 6 directions
+                        this.newLattice[i][j] = new Uint8Array(6);
+                    }
+                }
+
+                this.obstacles = [];
+                this.flowSpeed = 0.1;
+                this.density = 0.3;
+            }
+
+            // Initialize lattice with random particles
+            initialize(density = 0.3, flowSpeed = 0.1) {
+                this.density = density;
+                this.flowSpeed = flowSpeed;
+
+                for (let i = 0; i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        for (let d = 0; d < 6; d++) {
+                            // Add flow bias to the right
+                            let prob = density / 6;
+                            if (d === 0) prob += flowSpeed; // Right direction
+                            if (d === 3) prob -= flowSpeed * 0.5; // Left direction
+
+                            this.lattice[i][j][d] = Math.random() < prob ? 1 : 0;
+                        }
+                    }
+                }
+            }
+
+            // Add circular obstacle
+            addObstacle(x, y, radius) {
+                this.obstacles.push({ x, y, radius });
+            }
+
+            clearObstacles() {
+                this.obstacles = [];
+            }
+
+            // Check if a cell is inside an obstacle
+            isObstacle(i, j) {
+                const x = j * this.cellSize;
+                const y = i * this.cellSize;
+
+                for (let obs of this.obstacles) {
+                    const dx = x - obs.x;
+                    const dy = y - obs.y;
+                    if (dx * dx + dy * dy < obs.radius * obs.radius) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Get neighbor indices with periodic boundary conditions
+            getNeighbor(i, j, dir) {
+                let ni = i;
+                let nj = j;
+
+                // Hexagonal offset coordinates
+                if (i % 2 === 0) {
+                    // Even row
+                    switch(dir) {
+                        case 0: nj++; break;           // E
+                        case 1: ni--; break;            // NE
+                        case 2: ni--; nj--; break;      // NW
+                        case 3: nj--; break;            // W
+                        case 4: ni++; nj--; break;      // SW
+                        case 5: ni++; break;            // SE
+                    }
+                } else {
+                    // Odd row
+                    switch(dir) {
+                        case 0: nj++; break;            // E
+                        case 1: ni--; nj++; break;      // NE
+                        case 2: ni--; break;            // NW
+                        case 3: nj--; break;            // W
+                        case 4: ni++; break;            // SW
+                        case 5: ni++; nj++; break;      // SE
+                    }
+                }
+
+                // Periodic boundaries
+                ni = (ni + this.rows) % this.rows;
+                nj = (nj + this.cols) % this.cols;
+
+                return { i: ni, j: nj };
+            }
+
+            // Collision rules for FHP model
+            collide(particles) {
+                const sum = particles.reduce((a, b) => a + b, 0);
+
+                // No collision needed for 0 or 1 particle
+                if (sum <= 1) return particles;
+
+                const newParticles = new Uint8Array(6);
+
+                // 2-particle head-on collisions
+                if (sum === 2) {
+                    // Check for head-on collision patterns
+                    if (particles[0] && particles[3]) {
+                        // 0-3 collision -> scatter to 1,5 or 2,4
+                        if (Math.random() < 0.5) {
+                            newParticles[1] = 1;
+                            newParticles[5] = 1;
+                        } else {
+                            newParticles[2] = 1;
+                            newParticles[4] = 1;
+                        }
+                    } else if (particles[1] && particles[4]) {
+                        // 1-4 collision
+                        if (Math.random() < 0.5) {
+                            newParticles[0] = 1;
+                            newParticles[3] = 1;
+                        } else {
+                            newParticles[2] = 1;
+                            newParticles[5] = 1;
+                        }
+                    } else if (particles[2] && particles[5]) {
+                        // 2-5 collision
+                        if (Math.random() < 0.5) {
+                            newParticles[0] = 1;
+                            newParticles[3] = 1;
+                        } else {
+                            newParticles[1] = 1;
+                            newParticles[4] = 1;
+                        }
+                    } else {
+                        // No head-on collision, keep as is
+                        return particles;
+                    }
+                }
+                // 3-particle symmetric collision
+                else if (sum === 3) {
+                    // Check for symmetric triple collision
+                    if (particles[0] && particles[2] && particles[4]) {
+                        // Rotate 60 degrees
+                        newParticles[1] = 1;
+                        newParticles[3] = 1;
+                        newParticles[5] = 1;
+                    } else if (particles[1] && particles[3] && particles[5]) {
+                        // Rotate 60 degrees
+                        newParticles[0] = 1;
+                        newParticles[2] = 1;
+                        newParticles[4] = 1;
+                    } else {
+                        // No symmetric collision, keep as is
+                        return particles;
+                    }
+                }
+                // 4-particle collision
+                else if (sum === 4) {
+                    // For 4 particles, we can have special scattering rules
+                    // This is a simplified version
+                    for (let d = 0; d < 6; d++) {
+                        newParticles[d] = particles[d];
+                    }
+                }
+                else {
+                    // Keep as is for other cases
+                    return particles;
+                }
+
+                return newParticles;
+            }
+
+            // Single time step update
+            step() {
+                // Collision step
+                for (let i = 0; i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        if (!this.isObstacle(i, j)) {
+                            const collided = this.collide(this.lattice[i][j]);
+                            for (let d = 0; d < 6; d++) {
+                                this.lattice[i][j][d] = collided[d];
+                            }
+                        }
+                    }
+                }
+
+                // Streaming step (propagation)
+                for (let i = 0; i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        for (let d = 0; d < 6; d++) {
+                            this.newLattice[i][j][d] = 0;
+                        }
+                    }
+                }
+
+                for (let i = 0; i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        if (!this.isObstacle(i, j)) {
+                            for (let d = 0; d < 6; d++) {
+                                if (this.lattice[i][j][d]) {
+                                    const neighbor = this.getNeighbor(i, j, d);
+
+                                    // Bounce back at obstacles
+                                    if (this.isObstacle(neighbor.i, neighbor.j)) {
+                                        // Reverse direction
+                                        const reverseDir = (d + 3) % 6;
+                                        this.newLattice[i][j][reverseDir] = 1;
+                                    } else {
+                                        this.newLattice[neighbor.i][neighbor.j][d] = 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Swap lattices
+                [this.lattice, this.newLattice] = [this.newLattice, this.lattice];
+            }
+
+            // Calculate local density
+            getDensity(i, j) {
+                let sum = 0;
+                for (let d = 0; d < 6; d++) {
+                    sum += this.lattice[i][j][d];
+                }
+                return sum;
+            }
+
+            // Calculate local velocity
+            getVelocity(i, j) {
+                let vx = 0, vy = 0;
+                for (let d = 0; d < 6; d++) {
+                    if (this.lattice[i][j][d]) {
+                        vx += this.directions[d].x;
+                        vy += this.directions[d].y;
+                    }
+                }
+                const density = this.getDensity(i, j);
+                if (density > 0) {
+                    vx /= density;
+                    vy /= density;
+                }
+                return { x: vx, y: vy };
+            }
+
+            // Calculate vorticity (curl of velocity field)
+            getVorticity(i, j) {
+                const v = this.getVelocity(i, j);
+                const vRight = this.getVelocity(i, (j + 1) % this.cols);
+                const vUp = this.getVelocity((i - 1 + this.rows) % this.rows, j);
+
+                return (vRight.y - v.y) - (vUp.x - v.x);
+            }
+
+            // Count total particles
+            countParticles() {
+                let count = 0;
+                for (let i = 0; i < this.rows; i++) {
+                    for (let j = 0; j < this.cols; j++) {
+                        count += this.getDensity(i, j);
+                    }
+                }
+                return count;
+            }
+        }
+
+        // Visualization and UI
+        class Simulation {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.canvas.width = 800;
+                this.canvas.height = 400;
+
+                this.fluid = new HexLatticeFluid(this.canvas.width, this.canvas.height);
+                this.running = false;
+                this.visualMode = 'particles';
+
+                this.frameCount = 0;
+                this.lastTime = performance.now();
+                this.fps = 0;
+
+                // Animation control
+                this.targetFPS = 30;
+                this.frameDelay = 1000 / this.targetFPS;
+                this.lastFrameTime = 0;
+                this.simulationSpeed = 1.0;
+                this.stepsPerFrame = 2;
+
+                this.setupControls();
+                this.reset();
+            }
+
+            setupControls() {
+                document.getElementById('startBtn').addEventListener('click', () => this.start());
+                document.getElementById('pauseBtn').addEventListener('click', () => this.pause());
+                document.getElementById('resetBtn').addEventListener('click', () => this.reset());
+
+                document.getElementById('addObstacleBtn').addEventListener('click', () => {
+                    this.fluid.addObstacle(200, 200, 30);
+                    this.draw();
+                });
+
+                document.getElementById('clearObstaclesBtn').addEventListener('click', () => {
+                    this.fluid.clearObstacles();
+                    this.draw();
+                });
+
+                document.getElementById('densitySlider').addEventListener('input', (e) => {
+                    document.getElementById('densityValue').textContent = e.target.value;
+                    this.fluid.density = parseFloat(e.target.value);
+                });
+
+                document.getElementById('speedSlider').addEventListener('input', (e) => {
+                    document.getElementById('speedValue').textContent = e.target.value;
+                    this.fluid.flowSpeed = parseFloat(e.target.value);
+                });
+
+                document.getElementById('visualMode').addEventListener('change', (e) => {
+                    this.visualMode = e.target.value;
+                });
+
+                // FPS control
+                document.getElementById('fpsSlider').addEventListener('input', (e) => {
+                    this.targetFPS = parseInt(e.target.value);
+                    this.frameDelay = 1000 / this.targetFPS;
+                    document.getElementById('fpsValue').textContent = this.targetFPS;
+                });
+
+                // Simulation speed control
+                document.getElementById('simSpeedSlider').addEventListener('input', (e) => {
+                    this.simulationSpeed = parseFloat(e.target.value);
+                    document.getElementById('simSpeedValue').textContent = this.simulationSpeed.toFixed(1) + 'x';
+                    // Adjust steps per frame based on speed
+                    this.stepsPerFrame = Math.max(1, Math.round(2 * this.simulationSpeed));
+                });
+
+                // Add obstacle on click
+                this.canvas.addEventListener('click', (e) => {
+                    const rect = this.canvas.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    this.fluid.addObstacle(x, y, 20);
+                });
+            }
+
+            reset() {
+                const density = parseFloat(document.getElementById('densitySlider').value);
+                const speed = parseFloat(document.getElementById('speedSlider').value);
+                this.fluid.initialize(density, speed);
+                this.fluid.clearObstacles();
+                // Add default obstacle
+                this.fluid.addObstacle(200, 200, 30);
+                this.draw();
+            }
+
+            start() {
+                this.running = true;
+                this.lastFrameTime = performance.now();
+                this.animate(performance.now());
+            }
+
+            pause() {
+                this.running = false;
+            }
+
+            animate(currentTime) {
+                if (!this.running) return;
+
+                // FPS limiting
+                if (currentTime - this.lastFrameTime >= this.frameDelay) {
+                    // Update simulation with adjustable speed
+                    for (let i = 0; i < this.stepsPerFrame; i++) {
+                        this.fluid.step();
+                    }
+
+                    // Draw
+                    this.draw();
+
+                    // Update stats
+                    this.updateStats();
+
+                    this.lastFrameTime = currentTime;
+                }
+
+                requestAnimationFrame((time) => this.animate(time));
+            }
+
+            draw() {
+                this.ctx.fillStyle = '#000';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                switch(this.visualMode) {
+                    case 'particles':
+                        this.drawParticles();
+                        break;
+                    case 'density':
+                        this.drawDensityField();
+                        break;
+                    case 'velocity':
+                        this.drawVelocityField();
+                        break;
+                    case 'vorticity':
+                        this.drawVorticityField();
+                        break;
+                }
+
+                // Draw obstacles
+                this.drawObstacles();
+            }
+
+            drawParticles() {
+                this.ctx.fillStyle = '#00ff00';
+                const particleSize = 2;
+
+                for (let i = 0; i < this.fluid.rows; i++) {
+                    for (let j = 0; j < this.fluid.cols; j++) {
+                        const x = j * this.fluid.cellSize;
+                        const y = i * this.fluid.cellSize;
+
+                        for (let d = 0; d < 6; d++) {
+                            if (this.fluid.lattice[i][j][d]) {
+                                const px = x + this.fluid.directions[d].x * 3;
+                                const py = y + this.fluid.directions[d].y * 3;
+
+                                this.ctx.beginPath();
+                                this.ctx.arc(px, py, particleSize, 0, Math.PI * 2);
+                                this.ctx.fill();
+                            }
+                        }
+                    }
+                }
+            }
+
+            drawDensityField() {
+                const imageData = this.ctx.createImageData(this.canvas.width, this.canvas.height);
+                const data = imageData.data;
+
+                for (let i = 0; i < this.fluid.rows; i++) {
+                    for (let j = 0; j < this.fluid.cols; j++) {
+                        const density = this.fluid.getDensity(i, j);
+                        const intensity = Math.min(255, density * 50);
+
+                        for (let dy = 0; dy < this.fluid.cellSize; dy++) {
+                            for (let dx = 0; dx < this.fluid.cellSize; dx++) {
+                                const x = j * this.fluid.cellSize + dx;
+                                const y = i * this.fluid.cellSize + dy;
+
+                                if (x < this.canvas.width && y < this.canvas.height) {
+                                    const idx = (y * this.canvas.width + x) * 4;
+                                    data[idx] = 0;           // R
+                                    data[idx + 1] = intensity; // G
+                                    data[idx + 2] = 0;        // B
+                                    data[idx + 3] = 255;      // A
+                                }
+                            }
+                        }
+                    }
+                }
+
+                this.ctx.putImageData(imageData, 0, 0);
+            }
+
+            drawVelocityField() {
+                this.ctx.strokeStyle = '#00ff00';
+                this.ctx.lineWidth = 1;
+
+                const step = 2;
+                for (let i = 0; i < this.fluid.rows; i += step) {
+                    for (let j = 0; j < this.fluid.cols; j += step) {
+                        const x = j * this.fluid.cellSize + this.fluid.cellSize / 2;
+                        const y = i * this.fluid.cellSize + this.fluid.cellSize / 2;
+
+                        const v = this.fluid.getVelocity(i, j);
+                        const scale = 15;
+
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(x, y);
+                        this.ctx.lineTo(x + v.x * scale, y + v.y * scale);
+                        this.ctx.stroke();
+
+                        // Arrowhead
+                        const angle = Math.atan2(v.y, v.x);
+                        const headLen = 3;
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(x + v.x * scale, y + v.y * scale);
+                        this.ctx.lineTo(
+                            x + v.x * scale - headLen * Math.cos(angle - Math.PI / 6),
+                            y + v.y * scale - headLen * Math.sin(angle - Math.PI / 6)
+                        );
+                        this.ctx.moveTo(x + v.x * scale, y + v.y * scale);
+                        this.ctx.lineTo(
+                            x + v.x * scale - headLen * Math.cos(angle + Math.PI / 6),
+                            y + v.y * scale - headLen * Math.sin(angle + Math.PI / 6)
+                        );
+                        this.ctx.stroke();
+                    }
+                }
+            }
+
+            drawVorticityField() {
+                const imageData = this.ctx.createImageData(this.canvas.width, this.canvas.height);
+                const data = imageData.data;
+
+                for (let i = 1; i < this.fluid.rows - 1; i++) {
+                    for (let j = 1; j < this.fluid.cols - 1; j++) {
+                        const vort = this.fluid.getVorticity(i, j);
+                        const intensity = Math.min(255, Math.abs(vort) * 500);
+
+                        for (let dy = 0; dy < this.fluid.cellSize; dy++) {
+                            for (let dx = 0; dx < this.fluid.cellSize; dx++) {
+                                const x = j * this.fluid.cellSize + dx;
+                                const y = i * this.fluid.cellSize + dy;
+
+                                if (x < this.canvas.width && y < this.canvas.height) {
+                                    const idx = (y * this.canvas.width + x) * 4;
+                                    if (vort > 0) {
+                                        data[idx] = intensity;     // R
+                                        data[idx + 1] = 0;         // G
+                                        data[idx + 2] = 0;         // B
+                                    } else {
+                                        data[idx] = 0;             // R
+                                        data[idx + 1] = 0;         // G
+                                        data[idx + 2] = intensity; // B
+                                    }
+                                    data[idx + 3] = 255;          // A
+                                }
+                            }
+                        }
+                    }
+                }
+
+                this.ctx.putImageData(imageData, 0, 0);
+            }
+
+            drawObstacles() {
+                this.ctx.fillStyle = '#003300';
+                this.ctx.strokeStyle = '#00ff00';
+                this.ctx.lineWidth = 2;
+
+                for (let obs of this.fluid.obstacles) {
+                    this.ctx.beginPath();
+                    this.ctx.arc(obs.x, obs.y, obs.radius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                    this.ctx.stroke();
+                }
+            }
+
+            updateStats() {
+                // FPS
+                this.frameCount++;
+                const now = performance.now();
+                if (now - this.lastTime > 1000) {
+                    this.fps = this.frameCount;
+                    this.frameCount = 0;
+                    this.lastTime = now;
+                    document.getElementById('fps').textContent = this.fps;
+                }
+
+                // Particle count
+                const count = this.fluid.countParticles();
+                document.getElementById('particleCount').textContent = count;
+
+                // Reynolds number estimate
+                const L = this.fluid.obstacles.length > 0 ? this.fluid.obstacles[0].radius * 2 : 50;
+                const U = this.fluid.flowSpeed;
+                const Re = Math.round(U * L * 10);
+                document.getElementById('reynolds').textContent = Re;
+
+                // Simulation steps per frame
+                document.getElementById('simSteps').textContent = this.stepsPerFrame;
+            }
+        }
+
+        // Initialize simulation
+        const sim = new Simulation();
+        sim.draw();
+    </script>
+</body>
+</html>
